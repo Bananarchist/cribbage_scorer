@@ -61,16 +61,26 @@ defmodule CribbageScorer do
     calculate_probable_score_for_given_hand(hand, Enum.filter(deck(), fn x -> not Enum.member?(hand, x) end))
   end
   def calculate_probable_score_for_given_hand(hand, deck) do
+    # problem: hand equality is tested at least once (Enum.group_by/2) which is order-dependent on lists
+    deck_length = Enum.count(deck)
     Combinatorics.product([deck, possible_hands(hand)])
-    |> Enum.map(fn [cut_card | [a_hand | []]] -> {cut_card, {score([cut_card | a_hand]), a_hand}} end)
-    |> Enum.reduce(%{}, fn {cut_card, {score, a_hand}}, acc -> Map.update(acc, score, [{cut_card, a_hand}], fn x -> [{cut_card, a_hand} | x] end) end)
-    |> Enum.map(fn {score, hands} -> 
-      {score, 
-      Enum.group_by(hands, fn {cut_card, h} -> h end)
-      } 
-    end)
-
-  end
+    |> Enum.map(fn [cut_card | [a_hand | [] ]] -> {a_hand, cut_card, score([cut_card | a_hand])} end)
+    |> Enum.group_by(fn {a_hand, _, _} -> a_hand end)
+    |> Enum.map(fn {a_hand, scores} -> 
+      {avg, macks} = Enum.reduce(scores, {0, {[], 0}}, 
+        fn {_, cut_card, score}, {avg, {cc, macks}} -> 
+          {(score / deck_length) + avg,
+          cond do
+            score > macks -> {[cut_card], score}
+            score == macks -> {[cut_card | cc], macks}
+            true -> {cc, macks}
+          end
+          }
+        end)
+        %{"hand" => a_hand, "average" => avg, "max" => macks}
+      end)  
+      |> Enum.sort_by(&(&1["average"]))
+    end
   def card_value([_suit| [ card | []]]) do
     case card do
       :ace -> 1
