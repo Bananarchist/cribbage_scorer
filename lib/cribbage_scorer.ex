@@ -4,37 +4,8 @@ defmodule CribbageScorer do
   """
 
 
-  # needs to account for other players' draws
-  def score(hand) do
-    fifteen_points(hand) + nobs_points(hand) + pairs_points(hand) + flush_points(hand) + straight_points(hand)
-  end
 
-  def testable_combinations(hand) do
-    hand
-    |> Combinatorics.powerset
-    |> Enum.filter(fn x -> length(x) >= 2 end)
-  end
-  # probably a better way to do this, right?
-  def combinations([_card | []]) do
-    []
-  end
-  def combinations([c1 | [c2 | []]]) do
-    [[c1, c2]]
-  end
-  def combinations([c1 | [c2 | [c3 | []]]]) do
-    [[c1, c2, c3], [c1, c2], [c2, c3], [c1, c3]]
-  end
-  def combinations([c1 | [c2 | [c3 | [c4 | []]]]]) do
-    [[c1, c2], [c1, c3], [c1, c4]]
-    ++ combinations([c2, c3, c4])
-    ++ (Enum.map(combinations([c2, c3, c4]), fn x -> [c1 | x] end))
-  end
-  def combinations([c1 | [c2 | [c3 | [c4 | [c5 | []]]]]]) do
-    [[c1, c2], [c1, c3], [c1, c4], [c1, c5]]
-    ++ combinations([c2, c3, c4, c5])
-    ++ (Enum.map(combinations([c2, c3, c4, c5]), fn x -> [c1 | x] end))
-  end
-
+  # Inititalization
   def deck() do
     a = [:hearts, :diamonds, :clubs, :spades]
     b = [:ace, :two, :three, :four, :five, :six, :seven, :eight, :nine, :ten, :jack, :queen, :king]
@@ -44,15 +15,20 @@ defmodule CribbageScorer do
     hand = Enum.take_random(deck(), 6)
     {hand, Enum.filter(deck(), fn x -> not Enum.member?(hand, x) end)}
   end
+
+
+  # Combinatoric helpers
+  def testable_combinations(hand) do
+    hand
+    |> Combinatorics.powerset
+    |> Enum.filter(fn x -> length(x) >= 2 end)
+  end
+
   def possible_hands(hand) do
     Combinatorics.n_combinations(4, hand) 
   end
-  def random_cuts(deck, number) do
-    for _ <- 1..number, reduce: [] do
-      acc ->
-        Enum.take_random(deck, 1) ++ acc
-    end
-  end
+
+  # Show testing
   def calculate_probable_score() do
     {hand, deck} = draw()
     {hand, calculate_probable_score_for_given_hand(hand, deck)}
@@ -81,6 +57,14 @@ defmodule CribbageScorer do
       end)  
       |> Enum.sort_by(&(&1["average"]))
     end
+
+
+  # Scoring
+  
+  # needs to account for other players' draws
+  def score(hand) do
+    fifteen_points(hand) + nobs_points(hand) + pairs_points(hand) + flush_points(hand) + straight_points(hand)
+  end
   def card_value([_suit| [ card | []]]) do
     case card do
       :ace -> 1
