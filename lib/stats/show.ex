@@ -1,7 +1,8 @@
-defmodule CribbageScorer do
+defmodule Stats.Show  do
   @moduledoc """
   Documentation for `CribbageScorer`.
   """
+
   # Combinatoric helpers
   def possible_hands(hand) do
     Combinatorics.n_combinations(4, hand) 
@@ -112,11 +113,11 @@ defmodule CribbageScorer do
     end
   end
 
-  def hand_stats(hand) do
-    hand_stats(hand, grouped_scores_with_stats(hand))
+  def for_hand(hand) do
+    for_hand(hand, grouped_scores_with_stats(hand))
   end
   
-  def hand_stats(hand, grouped_scores_and_stats) do
+  def for_hand(hand, grouped_scores_and_stats) do
     hand_variants = Enum.count(grouped_scores_and_stats)
     score_stats =
       grouped_scores_and_stats
@@ -142,42 +143,6 @@ defmodule CribbageScorer do
           |> Map.update!(:worst_median_score, 
             fn {x, xh} -> crabalab(&>/2, {x, xh}, {s[:scoring_stats][:median_score], s[:hand]}) end)
         end)
-    %{hand: hand, hand_stats: hand_variants, score_stats: score_stats}
+    %{hand: hand, scores: grouped_scores_and_stats, score_stats: score_stats}
   end
-  # Show testing
-  def calculate_probable_score() do
-    {hand, deck} = Deck.deal(6, Deck.new())
-    {hand, calculate_probable_score_for_given_hand(hand, deck)}
-  end
-  def calculate_probable_score_for_given_hand(hand) do
-    calculate_probable_score_for_given_hand(hand, Enum.filter(Deck.new(), fn x -> not Enum.member?(hand, x) end))
-  end
-  def calculate_probable_score_for_given_hand(hand, deck) do
-    # problem: hand equality is tested at least once (Enum.group_by/2) which is order-dependent on lists
-    deck_length = Enum.count(deck)
-    hand
-    |> possible_hands
-    |> Enum.map(fn a_hand -> Enum.sort_by(a_hand, &Card.ordinal/1) end)
-    |> (fn x -> [deck, x] end).()
-    |> Combinatorics.product
-    |> Enum.map(fn [cut_card | [a_hand | [] ]] -> {a_hand, cut_card, Scorer.Show.score([cut_card | a_hand])} end)
-    |> Enum.group_by(fn {a_hand, _, _} -> a_hand end)
-    |> Enum.map(fn {a_hand, scores} -> 
-      {avg, macks} = Enum.reduce(scores, {0, {[], 0}}, 
-        fn {_, cut_card, score}, {avg, {cc, macks}} -> 
-          {(score / deck_length) + avg,
-          cond do
-            score > macks -> {[cut_card], score}
-            score == macks -> {[cut_card | cc], macks}
-            true -> {cc, macks}
-          end
-          }
-        end)
-        %{"hand" => a_hand, "average" => avg, "max" => macks}
-      end)  
-      |> Enum.sort_by(&(&1["average"]))
-    end
-
-  # Pegging testing
-  
 end
