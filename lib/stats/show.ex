@@ -145,4 +145,87 @@ defmodule Stats.Show  do
         end)
     %{hand: hand, scores: grouped_scores_and_stats, score_stats: score_stats}
   end
+
+  # Selectors
+  def best_mean_score(hand) do
+    best_mean_score(hand, for_hand(hand))
+  end
+  def best_mean_score(hand, hand_stats) do
+    hand_stats.score_stats[:best_mean_score]
+  end
+
+  def worst_mean_score(hand) do
+    worst_mean_score(hand, for_hand(hand))
+  end
+  def worst_mean_score(hand, hand_stats) do
+    hand_stats.score_stats[:worst_mean_score] |> elem(0);
+  end
+
+  def max_score(hand) do
+    max_score(hand, for_hand(hand))
+  end
+  def max_score(hand, hand_stats) do
+    hand_stats.score_stats[:max_score] |> elem(0);
+  end
+
+  def min_score(hand) do
+    min_score(hand, for_hand(hand))
+  end
+  def min_score(hand, hand_stats) do
+    hand_stats.score_stats[:min_score] |> elem(0);
+  end
+
+  def best_median_score(hand) do
+    best_median_score(hand, for_hand(hand))
+  end
+  def best_median_score(hand, hand_stats) do
+    hand_stats.score_stats[:best_median_score] |> elem(0);
+  end
+
+  def worst_median_score(hand) do
+    worst_median_score(hand, for_hand(hand))
+  end
+  def worst_median_score(hand, hand_stats) do
+    hand_stats.score_stats[:worst_median_score] |> elem(0);
+  end
+
+  defp stat_given_hand(stat, selection, hand) do
+    hand
+    |> Enum.find(%{error: "Hand not found"}, &(Enum.sort(&1[:hand]) == Enum.sort(selection)))
+    |> Map.get(:scoring_stats, %{error: "Hand not found"})
+    |> Map.get(stat, %{error: "Hand not found"})
+  end
+  defp stat_given_hand(stat, selection) do
+    stat_given_hand(stat, selection, for_hand(selection))
+  end
+
+  def mean_given_hand(selection, %{scores: scores}) do
+    stat_given_hand(:mean_score, selection, scores)
+  end
+
+  def max_given_hand(selection, %{scores: scores}) do
+    stat_given_hand(:max_score, selection, scores)
+  end
+
+  def min_given_hand(selection, %{scores: scores}) do
+    stat_given_hand(:min_score, selection, scores)
+  end
+
+  def median_given_hand(selection, %{scores: scores}) do
+    stat_given_hand(:median_score, selection, scores)
+  end
+
+  def probability_of_score_given_hand(score, given, hand) do
+    probability_of_score_given_hand(score, given, hand, for_hand(hand))
+  end
+  def probability_of_score_given_hand(score, given, hand, hand_stats) do
+    hand_stats.scores
+      |> Enum.find(%{error: "Hand not found"}, &(Enum.sort(&1[:hand]) == Enum.sort(given)))
+      |> Map.get(:scores, %{error: "Hand not found"})
+      |> Map.get(score, %{error: "Score for hand not found"})
+      |> Map.get(:probability)
+  end
+
 end
+
+
