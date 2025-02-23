@@ -3,6 +3,13 @@ defmodule Stats.Show  do
   Documentation for `CribbageScorer`.
   """
 
+  def new() do
+    {:stats, []}
+  end
+  def new(hand) do
+    {:stats, [hand: hand]}
+  end
+
   # Combinatoric helpers
   def possible_hands(hand) do
     Combinatorics.n_combinations(4, hand) 
@@ -13,94 +20,45 @@ defmodule Stats.Show  do
     |> Enum.map(fn cut_card -> {cut_card, Scorer.Show.score([cut_card | hand])} end)
   end
 
-  def all_show_scores(hand) do
-    d = Enum.reject(Deck.new(), fn x -> Enum.member?(hand, x) end)
-    hand
-    |> possible_hands
-    |> Task.async_stream(fn a_hand -> %{hand: a_hand, scores: hand_with_cut_card_scores(a_hand, d)} end)
+  def hand_scores({:stats, data}) do
+    d = Enum.reject(Deck.new(), fn x -> Enum.member?(data[:hand], x) end)
+    all_scores = 
+      data[:hand]
+      |> possible_hands
+      |> Task.async_stream(
+        fn a_hand -> %{hand: a_hand, scores: hand_with_cut_card_scores(a_hand, d)} end)
+      |> Enum.map(
+          fn {:ok, %{hand: h, scores: s}} -> 
+            total = Enum.count(s)
+            scores = 
+              s
+              |> Enum.group_by(fn {_, score} -> score end, fn {cut_card, _} -> cut_card end)
+              |> Enum.into(%{}, 
+                fn {score, cards} -> {score, %{probability: Enum.count(cards) / total, cut_cards: cards}} end)
+
+            Enum.reduce(scores, %{keeping: h, scoring: scores, mean: 0, max: 0, min: 29, median: []},
+                fn {score, %{probability: p, cut_cards: cc}}, acc -> 
+                  acc
+                  |> Map.update!(:mean, fn x -> x + score * p end)
+                  |> Map.update!(:max, fn x -> if x < score, do: score, else: x end)
+                  |> Map.update!(:min, fn x -> if x > score, do: score, else: x end)
+                  |> Map.update!(:median, fn x -> Enum.concat(x, Stream.repeatedly(fn -> score end) |> Enum.take(Enum.count(cc))) end)
+                end)
+            |> Map.update!(:median, fn median ->
+              median
+              |> Enum.sort
+              |> Enum.drop(if rem(total, 2) == 0, do: div(total, 2), else: div(total, 2) - 1)
+              |> List.first()
+              end)
+        end)
+    {:stats, Keyword.put(data, :scores, all_scores)}
   end
 
-  def show_scores_grouped_by_points(hand) do
-    show_scores_grouped_by_points(hand, all_show_scores(hand))
-  end
-  def show_scores_grouped_by_points(_hand, scores) do
-    Enum.map(scores, fn {:ok, %{hand: h, scores: s}} -> 
-      scores = Enum.group_by(s, fn {_, score} -> score end, fn {cut_card, _} -> cut_card end)
-      %{hand: h, scores: scores}
-      end)
+  def hand_scores(hand) do
+    hand_scores(new(hand))
   end
 
-  def grouped_scores_with_probabilities(hand) do
-    grouped_scores_with_probabilities(hand, show_scores_grouped_by_points(hand))
-  end
-
-  def grouped_scores_with_probabilities(_hand, scores) do
-    Enum.map(scores, fn %{hand: h, scores: s} -> 
-      total = Map.values(s) |> Enum.concat |> Enum.count
-      new_scores = Enum.into(s, %{}, fn {score, cards} -> {score, %{probability: Enum.count(cards) / total, cut_cards: cards}} end)
-      %{hand: h, scores: new_scores}
-      end)
-  end
   
-  def grouped_scores_with_stats(hand) do
-    grouped_scores_with_stats(hand, grouped_scores_with_probabilities(hand))
-  end
-
-  def grouped_scores_with_stats(_hand, scores) do
-    scores
-    |> Enum.map(&Map.put(&1, :scoring_stats, %{})) 
-    |> grouped_scores_with_mean
-    |> grouped_scores_with_max
-    |> grouped_scores_with_min
-    |> grouped_scores_with_median
-  end
-
-  def grouped_scores_with_mean(scores) do
-    averages = 
-      scores
-      |> Enum.map(fn %{scores: s} -> 
-          Enum.map(s, fn {score, data} -> data[:probability] * score end)
-          |> Enum.reduce(0, fn x, acc -> x + acc end)
-        end)
-    Enum.zip_with([scores, averages], fn [s, a] -> Map.update!(s, :scoring_stats, &Map.put(&1, :mean_score, a)) end)
-  end
-
-  def grouped_scores_with_max(scores) do
-    maxes =
-      scores
-      |> Enum.map(fn data ->
-          Enum.map(data[:scores], fn {score, _} -> score end)
-          |> Enum.reduce(0, fn x, acc -> if x > acc, do: x, else: acc end)
-        end)
-    Enum.zip_with([scores, maxes], fn [s, a] -> Map.update!(s, :scoring_stats, &Map.put(&1, :max_score, a)) end)
-  end
-
-  def grouped_scores_with_min(scores) do
-    minimums =
-      scores
-      |> Enum.map(fn %{scores: s} -> 
-          Enum.map(s, fn {score, data} -> score end)
-          |> Enum.reduce(29, fn x, acc -> if x < acc, do: x, else: acc end)
-        end)
-    Enum.zip_with([scores, minimums], fn [s, a] -> Map.update!(s, :scoring_stats, &Map.put(&1, :min_score, a)) end)
-  end
-
-  def grouped_scores_with_median(scores) do
-    medians =
-      scores
-      |> Enum.map(fn %{scores: s} -> 
-          s2 =
-            Enum.flat_map(s, fn {score, data} -> Enum.map(data[:cut_cards], fn _ -> score end) end)
-            |> Enum.sort()
-          length = Enum.count(s2)
-          if rem(length, 2) == 0 do
-            (Enum.at(s2, div(length, 2) - 1) + Enum.at(s2, div(length, 2))) / 2
-          else
-            Enum.at(s2, div(length, 2))
-          end
-      end)
-    Enum.zip_with([scores, medians], fn [s, a] -> Map.update!(s, :scoring_stats, &Map.put(&1, :median_score, a)) end)
-  end
 
   def crabalab(comparator, {standard, standard_value}, {replacement, replacement_value}) do
     cond do
@@ -113,14 +71,11 @@ defmodule Stats.Show  do
     end
   end
 
-  def for_hand(hand) do
-    for_hand(hand, grouped_scores_with_stats(hand))
-  end
   
-  def for_hand(hand, grouped_scores_and_stats) do
-    hand_variants = Enum.count(grouped_scores_and_stats)
+  def hand_stats({:stats, data}) do
+    hand_variants = Enum.count(data)
     score_stats =
-      grouped_scores_and_stats
+      data[:scores]
       |> Enum.reduce(
         %{best_mean_score: {0, []}, 
           worst_mean_score: {29,[]}, 
@@ -131,72 +86,129 @@ defmodule Stats.Show  do
         }, 
         fn s, acc ->
           Map.update!(acc, :best_mean_score, 
-            fn {x, xh} -> crabalab(&</2, {x, xh}, {s[:scoring_stats][:mean_score], s[:hand]}) end)
+            fn {x, xh} -> crabalab(&</2, {x, xh}, {s[:mean], s[:keeping]}) end)
           |> Map.update!(:worst_mean_score, 
-            fn {x, xh} -> crabalab(&>/2, {x, xh}, {s[:scoring_stats][:mean_score], s[:hand]}) end)
+            fn {x, xh} -> crabalab(&>/2, {x, xh}, {s[:mean], s[:keeping]}) end)
           |> Map.update!(:max_score, 
-            fn {x, xh} -> crabalab(&</2, {x, xh}, {s[:scoring_stats][:max_score], s[:hand]}) end)
+            fn {x, xh} -> crabalab(&</2, {x, xh}, {s[:max], s[:keeping]}) end)
           |> Map.update!(:min_score, 
-            fn {x, xh} -> crabalab(&>/2, {x, xh}, {s[:scoring_stats][:min_score], s[:hand]}) end)
+            fn {x, xh} -> crabalab(&>/2, {x, xh}, {s[:min], s[:keeping]}) end)
           |> Map.update!(:best_median_score, 
-            fn {x, xh} -> crabalab(&</2, {x, xh}, {s[:scoring_stats][:median_score], s[:hand]}) end)
+            fn {x, xh} -> crabalab(&</2, {x, xh}, {s[:median], s[:keeping]}) end)
           |> Map.update!(:worst_median_score, 
-            fn {x, xh} -> crabalab(&>/2, {x, xh}, {s[:scoring_stats][:median_score], s[:hand]}) end)
+            fn {x, xh} -> crabalab(&>/2, {x, xh}, {s[:median], s[:keeping]}) end)
         end)
-    %{hand: hand, scores: grouped_scores_and_stats, score_stats: score_stats}
+    {:stats, Keyword.put(data, :stats, score_stats)}
+  end
+  def hand_stats(hand) do
+    hand_stats(hand_scores(hand))
   end
 
   # Selectors
-  def best_mean_score(hand) do
-    best_mean_score(hand, for_hand(hand))
+  def select_hand_stat({:stats, data}, :all) do
+    data[:stats]
   end
-  def best_mean_score(hand, hand_stats) do
-    hand_stats.score_stats[:best_mean_score]
+  def select_hand_stat({:stats, data}, stat) do
+    data[:stats][stat] |> elem(0)
   end
-
-  def worst_mean_score(hand) do
-    worst_mean_score(hand, for_hand(hand))
-  end
-  def worst_mean_score(hand, hand_stats) do
-    hand_stats.score_stats[:worst_mean_score] |> elem(0);
+  def select_hand_stat(hand, stat) do
+    select_hand_stat(hand_stats(hand), stat)
   end
 
-  def max_score(hand) do
-    max_score(hand, for_hand(hand))
+  def best_mean_score(data), do: select_hand_stat(data, :best_mean_score)
+  def worst_mean_score(data), do: select_hand_stat(data, :worst_mean_score)
+  def max_score(data), do: select_hand_stat(data, :max_score)
+  def min_score(data), do: select_hand_stat(data, :min_score)
+  def best_median_score(data), do: select_hand_stat(data, :best_median_score)
+  def worst_median_score(data), do: select_hand_stat(data, :worst_median_score)
+
+  def select_hands_with({:stats, data}, selection) do
+    filtered = Enum.filter(data[:scores], fn s -> Enum.all?(selection, fn x -> Enum.member?(x, s[:keeping]) end) end)
+    if Enum.count(filtered) == 0 do
+      %{error: "Hand not found"}
+    else
+      filtered
+    end
   end
-  def max_score(hand, hand_stats) do
-    hand_stats.score_stats[:max_score] |> elem(0);
+  def select_hands_with({:error, e}, _), do: {:error, e}
+  def select_hands_with(selection, hand), do: select_hands_with(hand_stats(hand), selection)
+  
+  def where({:stats, data}, filters \\ []) do
+    {:stats, Keyword.update!(data, :scores, fn scores -> Enum.reduce(filters, scores, &where_helper/2) end)}
+  end
+  def where(hand, filters), do: where(hand_stats(hand), filters)
+
+  defp where_helper({:cards, cards}, scores) do
+    Enum.filter(scores, fn s -> Enum.all?(cards, fn c -> Enum.any?(s[:keeping], &Card.same_card?(c, &1)) end) end)
+  end
+  defp where_helper({:score, {comparator, score}}, scores) do
+    case comparator do
+      :gt -> where_score_helper({:score, {&>/2, score}}, scores)
+      :gte -> where_score_helper({:score, {&>=/2, score}}, scores)
+      :lt -> where_score_helper({:score, {&</2, score}}, scores)
+      :lte -> where_score_helper({:score, {&<=/2, score}}, scores)
+      :ne -> where_score_helper({:score, {&!=/2, score}}, scores)
+      :eq -> where_score_helper({:score, {&==/2, score}}, scores)
+      _ -> scores
+    end
+  end
+  defp where_helper({:score, score}, scores), do: where_score_helper({:score, {:eq, score}}, scores)
+
+  defp where_score_helper({:score, {comparator, score}}, scores) do
+    Enum.reduce(scores, [], 
+      fn s, acc ->
+        new_scoring = Enum.filter(s[:scoring], fn {sc, _} -> comparator.(sc, score) end)
+        if Enum.count(new_scoring) > 0 do
+          [Map.update!(s, :scoring, fn _ -> new_scoring end) | acc]
+        else
+          acc
+        end
+      end)
   end
 
-  def min_score(hand) do
-    min_score(hand, for_hand(hand))
+  def select({:stats, data}, selectors \\ []) do
+    Enum.reduce(selectors, data[:scores], &select_helper/2)
   end
-  def min_score(hand, hand_stats) do
-    hand_stats.score_stats[:min_score] |> elem(0);
+  def select(hand, selectors), do: select(hand_stats(hand), selectors)
+
+  defp select_helper(:hand, scores) do
+    Enum.map(scores, fn s -> s[:keeping] end)
+  end
+  defp select_helper(:scores, scores) do
+    Enum.map(scores, fn s -> s[:scoring] end)
+  end
+  defp select_helper(:mean, scores) do
+    Enum.map(scores, fn s -> s[:mean] end)
+  end
+  defp select_helper(:max, scores) do
+    Enum.map(scores, fn s -> s[:max] end)
+  end
+  defp select_helper(:min, scores) do
+    Enum.map(scores, fn s -> s[:min] end)
+  end
+  defp select_helper(:median, scores) do
+    Enum.map(scores, fn s -> s[:median] end)
   end
 
-  def best_median_score(hand) do
-    best_median_score(hand, for_hand(hand))
+
+  defp scoring_stats_given_hand(selection, stat, {:stats, data}) do
+    data[:scores]
+    |> Enum.find(%{error: "Hand not found"}, &(Enum.sort(&1[:hand]) == Enum.sort(selection)))
+    |> Map.get(:scoring_stats, %{error: "Hand not found"})
+    |> Map.get(stat, %{error: "Hand not found"})
   end
-  def best_median_score(hand, hand_stats) do
-    hand_stats.score_stats[:best_median_score] |> elem(0);
+  defp scoring_stats_given_hand(selection, stat) do
+    scoring_stats_given_hand(selection, stat, hand_stats(selection))
   end
 
-  def worst_median_score(hand) do
-    worst_median_score(hand, for_hand(hand))
-  end
-  def worst_median_score(hand, hand_stats) do
-    hand_stats.score_stats[:worst_median_score] |> elem(0);
-  end
-
-  defp stat_given_hand(stat, selection, hand) do
-    hand
+  defp stat_given_hand(stat, selection, f_h) do
+    f_h
     |> Enum.find(%{error: "Hand not found"}, &(Enum.sort(&1[:hand]) == Enum.sort(selection)))
     |> Map.get(:scoring_stats, %{error: "Hand not found"})
     |> Map.get(stat, %{error: "Hand not found"})
   end
   defp stat_given_hand(stat, selection) do
-    stat_given_hand(stat, selection, for_hand(selection))
+    stat_given_hand(stat, selection, hand_stats(selection))
   end
 
   def mean_given_hand(selection, %{scores: scores}) do
@@ -216,7 +228,7 @@ defmodule Stats.Show  do
   end
 
   def probability_of_score_given_hand(score, given, hand) do
-    probability_of_score_given_hand(score, given, hand, for_hand(hand))
+    probability_of_score_given_hand(score, given, hand, hand_stats(hand))
   end
   def probability_of_score_given_hand(score, given, hand, hand_stats) do
     hand_stats.scores

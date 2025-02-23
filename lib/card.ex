@@ -39,4 +39,16 @@ defmodule Card do
       :king -> 13
     end
   end
+
+  def same_rank?(card1, card2) do
+    rank(card1) == rank(card2)
+  end
+
+  def same_suit?(card1, card2) do
+    suit(card1) == suit(card2)
+  end
+
+  def same_card?(card1, card2) do
+    same_rank?(card1, card2) && same_suit?(card1, card2)
+  end
 end
